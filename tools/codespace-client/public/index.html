@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Codespaces Client</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+            background: #0b1117;
+            color: #e6edf3;
+        }
+        .layout {
+            display: grid;
+            grid-template-columns: 360px 1fr;
+            height: 100vh;
+        }
+        .sidebar {
+            border-right: 1px solid #30363d;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .panel {
+            padding: 14px;
+            border-bottom: 1px solid #30363d;
+        }
+        .status {
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+        .status small {
+            font-weight: 500;
+            color: #8b949e;
+        }
+        #qr {
+            background: white;
+            padding: 8px;
+            width: fit-content;
+            border-radius: 10px;
+            margin-top: 8px;
+        }
+        #qr.empty { display: none; }
+        .chat-list {
+            overflow: auto;
+            flex: 1;
+        }
+        .chat-item {
+            width: 100%;
+            border: 0;
+            border-bottom: 1px solid #21262d;
+            padding: 12px 14px;
+            text-align: left;
+            background: transparent;
+            color: #e6edf3;
+            cursor: pointer;
+        }
+        .chat-item:hover,
+        .chat-item.active {
+            background: #161b22;
+        }
+        .chat-name {
+            font-size: 14px;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .chat-preview {
+            margin-top: 4px;
+            color: #8b949e;
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .main {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .main-header {
+            padding: 14px;
+            border-bottom: 1px solid #30363d;
+            font-weight: 600;
+        }
+        .messages {
+            flex: 1;
+            overflow: auto;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .msg {
+            max-width: 70%;
+            padding: 10px 12px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.3;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .msg.in {
+            background: #1f2937;
+            align-self: flex-start;
+        }
+        .msg.out {
+            background: #0b6bcb;
+            align-self: flex-end;
+        }
+        .msg small {
+            display: block;
+            margin-top: 6px;
+            font-size: 11px;
+            opacity: 0.75;
+        }
+        .composer {
+            border-top: 1px solid #30363d;
+            display: flex;
+            gap: 10px;
+            padding: 14px;
+        }
+        .composer textarea {
+            flex: 1;
+            min-height: 44px;
+            max-height: 150px;
+            resize: vertical;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            background: #0d1117;
+            color: #e6edf3;
+            padding: 10px;
+        }
+        .composer button, #refreshBtn {
+            border: 1px solid #30363d;
+            background: #161b22;
+            color: #e6edf3;
+            border-radius: 8px;
+            padding: 10px 14px;
+            cursor: pointer;
+        }
+        .composer button:hover, #refreshBtn:hover { background: #1f2937; }
+        .empty {
+            color: #8b949e;
+            padding: 16px;
+        }
+        @media (max-width: 900px) {
+            .layout { grid-template-columns: 1fr; }
+            .sidebar { height: 50vh; }
+            .main { height: 50vh; }
+        }
+    </style>
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+        <div class="panel">
+            <div class="status" id="statusText">Starting...</div>
+            <button id="refreshBtn" type="button">Refresh chats</button>
+            <div id="qr" class="empty"></div>
+            <div id="identity" style="margin-top:8px;color:#8b949e;font-size:13px;"></div>
+        </div>
+        <div class="chat-list" id="chatList">
+            <div class="empty">Waiting for client readiness...</div>
+        </div>
+    </aside>
+
+    <main class="main">
+        <div class="main-header" id="chatTitle">Select a chat</div>
+        <div class="messages" id="messages">
+            <div class="empty">No chat selected.</div>
+        </div>
+        <form class="composer" id="composerForm">
+            <textarea id="composerInput" placeholder="Type a message..." disabled></textarea>
+            <button type="submit" id="sendBtn" disabled>Send</button>
+        </form>
+    </main>
+</div>
+
+<script>
+    const state = {
+        status: 'starting',
+        chats: [],
+        selectedChatId: null,
+        selectedChatName: null
+    };
+
+    const el = {
+        statusText: document.getElementById('statusText'),
+        identity: document.getElementById('identity'),
+        qr: document.getElementById('qr'),
+        chatList: document.getElementById('chatList'),
+        chatTitle: document.getElementById('chatTitle'),
+        messages: document.getElementById('messages'),
+        composerForm: document.getElementById('composerForm'),
+        composerInput: document.getElementById('composerInput'),
+        sendBtn: document.getElementById('sendBtn'),
+        refreshBtn: document.getElementById('refreshBtn')
+    };
+
+    let qrRenderer = null;
+
+    const escapeHtml = (text) => String(text)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+
+    const formatTime = (unixTs) => {
+        if (!unixTs) return '';
+        return new Date(unixTs * 1000).toLocaleString();
+    };
+
+    const setStatus = (statusState) => {
+        state.status = statusState.status;
+        el.statusText.textContent = `Status: ${statusState.status}`;
+
+        const identityBits = [];
+        if (statusState.info?.pushname) {
+            identityBits.push(statusState.info.pushname);
+        }
+        if (statusState.info?.wid) {
+            identityBits.push(statusState.info.wid);
+        }
+        if (statusState.info?.platform) {
+            identityBits.push(statusState.info.platform);
+        }
+        if (statusState.authFailure) {
+            identityBits.push(`Auth failure: ${statusState.authFailure}`);
+        }
+        if (statusState.disconnectedReason) {
+            identityBits.push(`Disconnected: ${statusState.disconnectedReason}`);
+        }
+        el.identity.textContent = identityBits.join(' · ');
+
+        renderQr(statusState.qr);
+
+        const ready = statusState.status === 'ready';
+        el.refreshBtn.disabled = !ready;
+        el.composerInput.disabled = !ready || !state.selectedChatId;
+        el.sendBtn.disabled = !ready || !state.selectedChatId;
+    };
+
+    const renderQr = (qrText) => {
+        el.qr.innerHTML = '';
+
+        if (!qrText) {
+            el.qr.classList.add('empty');
+            qrRenderer = null;
+            return;
+        }
+
+        el.qr.classList.remove('empty');
+        qrRenderer = new QRCode(el.qr, {
+            text: qrText,
+            width: 220,
+            height: 220,
+            correctLevel: QRCode.CorrectLevel.M
+        });
+    };
+
+    const fetchJson = async (url, options = {}) => {
+        const response = await fetch(url, options);
+        const json = await response.json();
+        if (!response.ok) {
+            throw new Error(json.error || `Request failed (${response.status})`);
+        }
+        return json;
+    };
+
+    const renderChatList = () => {
+        if (!state.chats.length) {
+            el.chatList.innerHTML = '<div class="empty">No chats available.</div>';
+            return;
+        }
+
+        el.chatList.innerHTML = state.chats.map(chat => `
+            <button class="chat-item ${state.selectedChatId === chat.id ? 'active' : ''}" data-chat-id="${escapeHtml(chat.id)}" data-chat-name="${escapeHtml(chat.name)}">
+                <div class="chat-name">${escapeHtml(chat.name)}</div>
+                <div class="chat-preview">${escapeHtml(chat.lastMessageBody || '')}</div>
+            </button>
+        `).join('');
+
+        for (const button of el.chatList.querySelectorAll('.chat-item')) {
+            button.addEventListener('click', () => {
+                const { chatId, chatName } = button.dataset;
+                selectChat(chatId, chatName);
+            });
+        }
+    };
+
+    const renderMessages = (messages) => {
+        if (!messages.length) {
+            el.messages.innerHTML = '<div class="empty">No messages in this chat yet.</div>';
+            return;
+        }
+
+        el.messages.innerHTML = messages.map(message => `
+            <div class="msg ${message.fromMe ? 'out' : 'in'}">
+                ${escapeHtml(message.body || `[${message.type}]`)}
+                <small>${escapeHtml(formatTime(message.timestamp))}</small>
+            </div>
+        `).join('');
+
+        el.messages.scrollTop = el.messages.scrollHeight;
+    };
+
+    const loadChats = async () => {
+        try {
+            const { chats } = await fetchJson('/api/chats');
+            state.chats = chats;
+            renderChatList();
+
+            if (!state.selectedChatId && chats.length) {
+                await selectChat(chats[0].id, chats[0].name);
+            }
+        } catch (error) {
+            el.chatList.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+        }
+    };
+
+    const selectChat = async (chatId, chatName) => {
+        state.selectedChatId = chatId;
+        state.selectedChatName = chatName;
+        el.chatTitle.textContent = chatName;
+        el.composerInput.disabled = state.status !== 'ready';
+        el.sendBtn.disabled = state.status !== 'ready';
+        renderChatList();
+
+        try {
+            const { messages } = await fetchJson(`/api/chats/${encodeURIComponent(chatId)}/messages?limit=60`);
+            renderMessages(messages);
+        } catch (error) {
+            el.messages.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+        }
+    };
+
+    el.refreshBtn.addEventListener('click', loadChats);
+
+    el.composerForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+
+        const text = el.composerInput.value.trim();
+        if (!text || !state.selectedChatId) {
+            return;
+        }
+
+        el.sendBtn.disabled = true;
+        try {
+            await fetchJson('/api/send', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ chatId: state.selectedChatId, message: text })
+            });
+            el.composerInput.value = '';
+            await selectChat(state.selectedChatId, state.selectedChatName);
+        } catch (error) {
+            alert(error.message);
+        } finally {
+            el.sendBtn.disabled = state.status !== 'ready' || !state.selectedChatId;
+        }
+    });
+
+    const connectEvents = () => {
+        const eventSource = new EventSource('/events');
+
+        eventSource.addEventListener('state', async (event) => {
+            const statusState = JSON.parse(event.data);
+            const previous = state.status;
+            setStatus(statusState);
+
+            if (statusState.status === 'ready' && previous !== 'ready') {
+                await loadChats();
+            }
+        });
+
+        eventSource.addEventListener('message', async (event) => {
+            const message = JSON.parse(event.data);
+            if (!state.selectedChatId) return;
+
+            if (message.from === state.selectedChatId || message.to === state.selectedChatId) {
+                await selectChat(state.selectedChatId, state.selectedChatName);
+            }
+        });
+
+        eventSource.onerror = () => {
+            el.statusText.textContent = 'Status: reconnecting...';
+        };
+    };
+
+    const bootstrap = async () => {
+        try {
+            const statusState = await fetchJson('/api/state');
+            setStatus(statusState);
+            if (statusState.status === 'ready') {
+                await loadChats();
+            }
+            connectEvents();
+        } catch (error) {
+            el.statusText.textContent = `Status: ${error.message}`;
+        }
+    };
+
+    bootstrap();
+</script>
+</body>
+</html>

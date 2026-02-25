@@ -65,6 +65,34 @@ client.initialize();
 Take a look at [example.js][examples] for another examples with additional use cases.  
 For further details on saving and restoring sessions, explore the provided [Authentication Strategies][auth-strategies].
 
+## Run a browser client in GitHub Codespaces
+
+You can run a lightweight browser dashboard (QR login, chats, messages, send text) directly from this repository:
+
+```bash
+npm install
+npm run codespace-client
+```
+
+If Chromium fails to launch in your Codespace with missing shared libraries, install runtime dependencies first:
+
+```bash
+sudo apt update
+sudo apt install -y \
+    libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 \
+    libxdamage1 libxfixes3 libxrandr2 libgbm1 libasound2t64 libpango-1.0-0 libcairo2 \
+    libatspi2.0-0 libgtk-3-0 libnss3 libxss1 libxtst6
+```
+
+Then, in Codespaces, forward/open the port used by the server (default: `3000`) and open it in your browser.
+
+Notes:
+
+- The dashboard stores your session using `LocalAuth`, so you usually only scan once per Codespace.
+- Configure the port with `PORT=xxxx npm run codespace-client`.
+- If needed, change Chromium headless mode with `HEADLESS=false npm run codespace-client`.
+- If you want to use a custom browser binary, set `CHROME_EXECUTABLE_PATH=/path/to/chrome`.
+
 
 ## Supported features
 
