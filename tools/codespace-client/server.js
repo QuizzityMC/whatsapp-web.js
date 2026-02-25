@@ -87,11 +87,13 @@ const serializeChat = (chat) => ({
 
 const serializeMessage = (message) => ({
     id: message.id._serialized,
+    chatId: message.fromMe ? message.to : message.from,
     body: message.body || '',
     type: message.type,
     from: message.from,
     to: message.to,
     author: message.author || null,
+    notifyName: message.notifyName || null,
     fromMe: Boolean(message.fromMe),
     timestamp: message.timestamp,
     hasMedia: Boolean(message.hasMedia),
